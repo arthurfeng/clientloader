@@ -36,7 +36,7 @@ def add_flash_client(url):
 
 def add_hls_client(url):
     
-    client = mythread.Thread(target=hls.connect, args=(url,), name="hls,%s" % url)
+    client = multiprocessing.Process(target=hls.connect, args=(url,), name="hls,%s" % url)
     client.start()
     if client.is_alive():
         client_uuid = str(uuid.uuid1())
@@ -47,7 +47,7 @@ def add_hls_client(url):
     
 def add_real_client(url):
     
-    client = mythread.Thread(target=real.connect, args=(url,), name="rtsp,%s" % url)
+    client = multiprocessing.Process(target=real.connect, args=(url,), name="rtsp,%s" % url)
     client.start()
     if client.is_alive():
         client_uuid = str(uuid.uuid1())
@@ -151,11 +151,11 @@ class ClientServer(SimpleHTTPRequestHandler):
                 restart_on_failed = int(parameter[-1])
         if request_type == "add_client.html":
             start_client(client_url, client_number)
-            self.__data_buffer = "%s,%s\n" % (client_number, client_url)
+            self.__data_buffer = "%s,%s\n" % (check_alive_clients(), client_url)
             return True
         elif request_type == "del_client.html":
             stop_clients(client_number, random_stop, client_type)
-            self.__data_buffer = "%s\n" % client_number
+            self.__data_buffer = "%s\n" % check_stop_clients_number(False)
             return True
         elif request_type == "status_client.html":
             failed_number = check_stop_clients_number(restart_on_failed)

@@ -56,8 +56,11 @@ class HLS(object):
             
 def connect(url):
     
-    HLS_Client = HLS()
-    HLS_Client.play(url)
+    try:
+        HLS_Client = HLS()
+        HLS_Client.play(url)
+    except HLSError, error:
+        print "%s:%s" % (error.response, error.url)
 
 if __name__ == "__main__":
     

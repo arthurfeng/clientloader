@@ -35,8 +35,11 @@ class Real():
 
 def connect(url):
     
-    real_client = Real()
-    real_client.play(url)
+    try:
+        real_client = Real()
+        real_client.play(url)
+    except RTSPError, error:
+        print "%s:%s" % (error.response, error.url)
 
 if __name__ == '__main__':
     
