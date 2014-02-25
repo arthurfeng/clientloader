@@ -10,6 +10,7 @@ import random
 import os
 import re
 import sys
+import uuid
 import time
 import urlparse
 import BaseHTTPServer
@@ -20,14 +21,16 @@ try:
 except ImportError:
     from StringIO import StringIO
 
-CLIENTLIST = list()
+CLIENTSTATUS = dict()
 
 def add_flash_client(url):
     
     client = multiprocessing.Process(target=flash.connect, args=(url,), name="rtmp,%s" % url)
     client.start()
     if client.is_alive():
-        CLIENTLIST.append(client)
+        client_uuid = str(uuid.uuid1())
+        CLIENTSTATUS[client_uuid] = client
+        time.sleep(0.5)
     else:
         add_flash_client(url)
 
@@ -36,7 +39,9 @@ def add_hls_client(url):
     client = mythread.Thread(target=hls.connect, args=(url,), name="hls,%s" % url)
     client.start()
     if client.is_alive():
-        CLIENTLIST.append(client)
+        client_uuid = str(uuid.uuid1())
+        CLIENTSTATUS[client_uuid] = client
+        time.sleep(0.5)
     else:
         add_hls_client(url)
     
@@ -45,7 +50,9 @@ def add_real_client(url):
     client = mythread.Thread(target=real.connect, args=(url,), name="rtsp,%s" % url)
     client.start()
     if client.is_alive():
-        CLIENTLIST.append(client)
+        client_uuid = str(uuid.uuid1())
+        CLIENTSTATUS[client_uuid] = client
+        time.sleep(0.5)
     else:
         add_real_client(url)
 
@@ -64,22 +71,23 @@ def start_client(url, client_number):
 def check_stop_clients_number(restart_client_on_failure=False):
     
     failed_client_number = 0
-    for client in CLIENTLIST:
+    for uuid in CLIENTSTATUS.keys():
+        client = CLIENTSTATUS[uuid]
         if not client.is_alive():
             if restart_client_on_failure:
-                CLIENTLIST.remove(client)
-                start_client(client.name.split(",")[-1], 1)
+                if CLIENTSTATUS.pop(uuid, None):
+                    start_client(client.name.split(",")[-1], 1)
             failed_client_number += 1
     return failed_client_number
             
 def check_clients_number():
     
-    return len(CLIENTLIST)
+    return len(CLIENTSTATUS.keys())
 
 def check_alive_clients():
     
     alive_client_number = 0
-    for client in CLIENTLIST:
+    for client in CLIENTSTATUS.values():
         if client.is_alive():
             alive_client_number += 1
     return alive_client_number
@@ -87,16 +95,16 @@ def check_alive_clients():
 def stop_clients(clients_number=0, random_stop=1, client_type=None):
     
     if random_stop and not client_type:
-        TIMER = len(CLIENTLIST)
+        TIMER = len(CLIENTSTATUS.keys())
         while TIMER:
-            client = random.choice(CLIENTLIST)
+            client = random.choice(CLIENTSTATUS.values())
             if client.is_alive():
                 client.terminate()
                 clients_number -= 1
             if clients_number == 0:
                 return
             TIMER -= 1
-    for client in CLIENTLIST:
+    for client in CLIENTSTATUS.values():
         if client_type and client.is_alive() and client.name.split(",")[0].lower() == client_type:
             client.terminate()
             clients_number -= 1
@@ -105,7 +113,7 @@ def stop_clients(clients_number=0, random_stop=1, client_type=None):
 
 def stop_force():
     
-    for i in CLIENTLIST:
+    for i in CLIENTSTATUS.values():
         if i.is_alive():
             i.terminate()
 
