@@ -44,7 +44,7 @@ def add_hls_client(url):
         time.sleep(0.5)
     else:
         add_hls_client(url)
-    
+
 def add_real_client(url):
     
     client = multiprocessing.Process(target=real.connect, args=(url,), name="rtsp,%s" % url)
@@ -92,30 +92,37 @@ def check_alive_clients():
             alive_client_number += 1
     return alive_client_number
 
+def stop_client(client):
+    
+    client.terminate()
+    time.sleep(0.1)
+    if client.is_alive():
+        stop_client()
+    return True
+
 def stop_clients(clients_number=0, random_stop=1, client_type=None):
     
     if random_stop and not client_type:
         TIMER = len(CLIENTSTATUS.keys())
         while TIMER:
             client = random.choice(CLIENTSTATUS.values())
-            if client.is_alive():
-                client.terminate()
+            if stop_client(client):
                 clients_number -= 1
             if clients_number == 0:
                 return
             TIMER -= 1
     for client in CLIENTSTATUS.values():
         if client_type and client.is_alive() and client.name.split(",")[0].lower() == client_type:
-            client.terminate()
-            clients_number -= 1
+            if stop_client(client):
+                clients_number -= 1
         if clients_number == 0:
             return
 
 def stop_force():
     
-    for i in CLIENTSTATUS.values():
-        if i.is_alive():
-            i.terminate()
+    for client in CLIENTSTATUS.values():
+        stop_client(client)
+    CLIENTSTATUS.clear()
 
 class ClientServer(SimpleHTTPRequestHandler):
     
@@ -162,6 +169,10 @@ class ClientServer(SimpleHTTPRequestHandler):
             alive_number = check_alive_clients()
             all_number = check_clients_number()
             self.__data_buffer = "%s,%s,%s\n" % (failed_number, alive_number, all_number)
+            return True
+        elif request_type == "clear_client.html":
+            stop_force()
+            self.__data_buffer = "%s\n" % check_stop_clients_number(False)
             return True
         return False
         
