@@ -43,6 +43,10 @@ class Http(object):
             response = http_conn.getresponse()
             if response.status == 200:
                 data = response.read()
+                if response.getheader('content_length', None):
+                    content_length = response.getheader('content_length', None)
+                    if len(data) != content_length:
+                        return self.get1(url)
                 return (1, data, url)
             elif response.status == 302:
                 refer_url = response.getheader('location')

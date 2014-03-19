@@ -23,71 +23,72 @@ except ImportError:
 
 CLIENTSTATUS = dict()
 
-def add_flash_client(url):
+def add_flash_client(task_uuid, url):
     
     client = multiprocessing.Process(target=flash.connect, args=(url,), name="rtmp,%s" % url)
     client.start()
     if client.is_alive():
         client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[client_uuid] = client
+        CLIENTSTATUS[task_uuid][client_uuid] = client
         time.sleep(0.5)
     else:
         add_flash_client(url)
 
-def add_hls_client(url):
+def add_hls_client(task_uuid, url):
     
     client = multiprocessing.Process(target=hls.connect, args=(url,), name="hls,%s" % url)
     client.start()
     if client.is_alive():
         client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[client_uuid] = client
+        CLIENTSTATUS[task_uuid][client_uuid] = client
         time.sleep(0.5)
     else:
         add_hls_client(url)
 
-def add_real_client(url):
+def add_real_client(task_uuid, url):
     
     client = multiprocessing.Process(target=real.connect, args=(url,), name="rtsp,%s" % url)
     client.start()
     if client.is_alive():
         client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[client_uuid] = client
+        CLIENTSTATUS[task_uuid][client_uuid] = client
         time.sleep(0.5)
     else:
         add_real_client(url)
 
-def start_client(url, client_number):
+def start_client(task_uuid, url, client_number):
     
     if re.match("rtmp://", url):
         for i in range(client_number):
-            add_flash_client(url)
+            add_flash_client(task_uuid, url)
     elif re.search(".m3u8", url) or re.search("m3ugen", url):
         for i in range(client_number):
-            add_hls_client(url)
+            add_hls_client(task_uuid, url)
     elif re.match("rtsp://", url):
         for i in range(client_number):
-            add_real_client(url)
+            add_real_client(task_uuid, url)
 
-def check_stop_clients_number(restart_client_on_failure=False):
+def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
     
     failed_client_number = 0
-    for uuid in CLIENTSTATUS.keys():
-        client = CLIENTSTATUS[uuid]
+    for uuid in CLIENTSTATUS[task_uuid].keys():
+        client = CLIENTSTATUS[task_uuid][uuid]
         if not client.is_alive():
             if restart_client_on_failure:
-                if CLIENTSTATUS.pop(uuid, None):
-                    start_client(client.name.split(",")[-1], 1)
+                if CLIENTSTATUS[task_uuid].pop(uuid, None):
+                    start_client(task_uuid, client.name.split(",")[-1], 1)
             failed_client_number += 1
     return failed_client_number
             
-def check_clients_number():
+def check_clients_number(task_uuid):
     
-    return len(CLIENTSTATUS.keys())
+    return len(CLIENTSTATUS[task_uuid].keys())
 
-def check_alive_clients():
+def check_alive_clients(task_uuid):
     
     alive_client_number = 0
-    for client in CLIENTSTATUS.values():
+    
+    for client in CLIENTSTATUS[task_uuid].values():
         if client.is_alive():
             alive_client_number += 1
     return alive_client_number
@@ -100,27 +101,27 @@ def stop_client(client):
         stop_client()
     return True
 
-def stop_clients(clients_number=0, random_stop=1, client_type=None):
+def stop_clients(task_uuid, clients_number=0, random_stop=1, client_type=None):
     
     if random_stop and not client_type:
-        TIMER = len(CLIENTSTATUS.keys())
+        TIMER = len(CLIENTSTATUS[task_uuid].keys())
         while TIMER:
-            client = random.choice(CLIENTSTATUS.values())
+            client = random.choice(CLIENTSTATUS[task_uuid].values())
             if stop_client(client):
                 clients_number -= 1
             if clients_number == 0:
                 return
             TIMER -= 1
-    for client in CLIENTSTATUS.values():
+    for client in CLIENTSTATUS[task_uuid].values():
         if client_type and client.is_alive() and client.name.split(",")[0].lower() == client_type:
             if stop_client(client):
                 clients_number -= 1
         if clients_number == 0:
             return
 
-def stop_force():
+def stop_force(task_uuid):
     
-    for client in CLIENTSTATUS.values():
+    for client in CLIENTSTATUS[task_uuid].values():
         stop_client(client)
     CLIENTSTATUS.clear()
 
@@ -137,6 +138,7 @@ class ClientServer(SimpleHTTPRequestHandler):
             
     def parse_url(self):
         
+        task_uuid = None
         client_url = None
         client_number = 1
         client_type = None
@@ -156,23 +158,32 @@ class ClientServer(SimpleHTTPRequestHandler):
                 client_type = parameter[-1]
             elif parameter[0].lower() == "restart":
                 restart_on_failed = int(parameter[-1])
+            elif parameter[0].lower() == 'uuid':
+                task_uuid = parameter[-1]
         if request_type == "add_client.html":
-            start_client(client_url, client_number)
-            self.__data_buffer = "%s,%s\n" % (check_alive_clients(), client_url)
+            if task_uuid is None:
+                task_uuid = str(uuid.uuid1())
+            CLIENTSTATUS[task_uuid] = {}
+            start_client(task_uuid, client_url, client_number)
+            self.__data_buffer = "%s,%s,%s\n" % (task_uuid, check_alive_clients(task_uuid), client_url)
             return True
         elif request_type == "del_client.html":
-            stop_clients(client_number, random_stop, client_type)
-            self.__data_buffer = "%s\n" % check_stop_clients_number(False)
+            if not task_uuid:
+                return False
+            stop_clients(task_uuid, client_number, random_stop, client_type)
+            self.__data_buffer = "%s,%s\n" % (task_uuid, check_stop_clients_number(task_uuid, False))
             return True
         elif request_type == "status_client.html":
-            failed_number = check_stop_clients_number(restart_on_failed)
-            alive_number = check_alive_clients()
-            all_number = check_clients_number()
-            self.__data_buffer = "%s,%s,%s\n" % (failed_number, alive_number, all_number)
+            if not task_uuid:
+                return False
+            failed_number = check_stop_clients_number(task_uuid, restart_on_failed)
+            alive_number = check_alive_clients(task_uuid)
+            all_number = check_clients_number(task_uuid)
+            self.__data_buffer = "%s,%s,%s,%s\n" % (task_uuid, failed_number, alive_number, all_number)
             return True
         elif request_type == "clear_client.html":
-            stop_force()
-            self.__data_buffer = "%s\n" % check_stop_clients_number(False)
+            stop_force(task_uuid)
+            self.__data_buffer = "%s,%s\n" % (task_uuid, check_stop_clients_number(task_uuid, False))
             return True
         return False
         
