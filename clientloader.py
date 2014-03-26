@@ -5,6 +5,7 @@ Created on 2014-2-21
 '''
 from src import flash, hls, real
 from src.libs import mythread
+import matplotlib.pyplot as plt
 import multiprocessing
 import random
 import os
@@ -22,6 +23,8 @@ except ImportError:
     from StringIO import StringIO
 
 CLIENTSTATUS = dict()
+X_PLOT = list()
+Y_PLOT = list()
 
 def add_flash_client(task_uuid, url):
     
@@ -93,6 +96,10 @@ def check_alive_clients(task_uuid):
             alive_client_number += 1
     return alive_client_number
 
+def check_taskid_number():
+    
+    return len(CLIENTSTATUS.keys())
+
 def stop_client(client):
     
     client.terminate()
@@ -124,6 +131,31 @@ def stop_force(task_uuid):
     for client in CLIENTSTATUS[task_uuid].values():
         stop_client(client)
     CLIENTSTATUS.clear()
+    
+def clear_clients():
+    
+    for clientid in CLIENTSTATUS.values():
+        for client in clientid.values():
+            stop_client(client)
+    CLIENTSTATUS.clear()
+
+def check_taskid():
+    
+    return ",".join(CLIENTSTATUS.keys())
+
+def do_plot():
+    
+    X_PLOT.append(time.strftime("%H:%M:%S", time.localtime())) 
+    plt.title(u"Clients Status")
+    plt.xlabel(u"Time: %s" %  time.strftime("%Y-%m-%d", time.localtime()) )
+    plt.ylabel(u"Number")
+    for i in range(len(CLIENTSTATUS.keys())):
+        pass
+    y1=[12,3,4,5,6]
+    y2=[2,3,45,6,7]
+    plt.plot(X_PLOT,y1)
+    plt.plot(X_PLOT,y2)
+    plt.show()
 
 class ClientServer(SimpleHTTPRequestHandler):
     
@@ -182,8 +214,11 @@ class ClientServer(SimpleHTTPRequestHandler):
             self.__data_buffer = "%s,%s,%s,%s\n" % (task_uuid, failed_number, alive_number, all_number)
             return True
         elif request_type == "clear_client.html":
-            stop_force(task_uuid)
-            self.__data_buffer = "%s,%s\n" % (task_uuid, check_stop_clients_number(task_uuid, False))
+            clear_clients()
+            self.__data_buffer = "%s\n" % (check_taskid_number())
+            return True
+        elif request_type == "query_client.html":
+            self.__data_buffer = "%s" % check_taskid()
             return True
         return False
         
@@ -233,4 +268,4 @@ if __name__ == '__main__':
     except Exception, e:
         print e
     finally:
-        stop_force()
+        clear_clients()

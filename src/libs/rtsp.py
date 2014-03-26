@@ -389,7 +389,7 @@ class Rtsp():
 
         if Range.split("-")[-1] != "":
             self.VOD = True
-            self.recive_buffer = int(Range.split("-")[-1]) * 1024
+            self.recive_buffer = float(Range.split("-")[-1]) * 1024
         else:
             self.recive_buffer = 1024
         smsg = self.gen_PLAY(Range)
@@ -500,7 +500,7 @@ class Rtsp():
                     count = 0
                 for j in self.session_server_list:
                     j.settimeout(keeplive)
-                    rmsg, address = j.recvfrom(self.recive_buffer)
+                    rmsg, address = j.recvfrom(int(self.recive_buffer))
                 time.sleep(1)
                 if self.VOD:
                     break
