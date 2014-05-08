@@ -3,9 +3,9 @@ Created on 2014-2-21
 
 @author: fengjian
 '''
-from src import flash, hls, real
+from src import flash, hls, real, dash
 from src.libs import mythread
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 import multiprocessing
 import random
 import os
@@ -25,6 +25,8 @@ except ImportError:
 CLIENTSTATUS = dict()
 X_PLOT = list()
 Y_PLOT = list()
+HTTP_PROTOCOL = "HTTP/1.0"
+HTTP_PORT = 8888
 
 def add_flash_client(task_uuid, url):
     
@@ -48,6 +50,17 @@ def add_hls_client(task_uuid, url):
     else:
         add_hls_client(url)
 
+def add_dash_client(task_uuid, url):
+    
+    client = multiprocessing.Process(target=dash.connect, args=(url,), name="dash,%s" % url)
+    client.start()
+    if client.is_alive():
+        client_uuid = str(uuid.uuid1())
+        CLIENTSTATUS[task_uuid][client_uuid] = client
+        time.sleep(0.5)
+    else:
+        add_dash_client(url)
+
 def add_real_client(task_uuid, url):
     
     client = multiprocessing.Process(target=real.connect, args=(url,), name="rtsp,%s" % url)
@@ -70,6 +83,9 @@ def start_client(task_uuid, url, client_number):
     elif re.match("rtsp://", url):
         for i in range(client_number):
             add_real_client(task_uuid, url)
+    elif re.match("dashgen", url) or re.search("bmff", url) or re.search("mpd", url):
+        for i in range(client_number):
+            add_dash_client(task_uuid, url)
 
 def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
     
@@ -259,12 +275,20 @@ class ClientServer(SimpleHTTPRequestHandler):
 
 def start(HandlerClass = ClientServer,
          ServerClass = BaseHTTPServer.HTTPServer):
-    BaseHTTPServer.test(HandlerClass, ServerClass)
+    server_address = ('', HTTP_PORT)
+
+    HandlerClass.protocol_version = HTTP_PROTOCOL
+    httpd = ServerClass(server_address, HandlerClass)
+
+    sa = httpd.socket.getsockname()
+    print "Serving HTTP on", sa[0], "port", sa[1], "..."
+    httpd.serve_forever()
 
 if __name__ == '__main__':
     
     try:
-        print start()
+        
+        start()
     except Exception, e:
         print e
     finally:

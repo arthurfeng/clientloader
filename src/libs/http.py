@@ -39,7 +39,7 @@ class Http(object):
             http_conn = None
             host = urlparse.urlparse(url)
             http_conn = httplib.HTTPConnection(host.netloc)
-            http_conn.request('GET',host.path)
+            http_conn.request('GET', "%s?%s" % (host.path, host.query))
             response = http_conn.getresponse()
             if response.status == 200:
                 data = response.read()
