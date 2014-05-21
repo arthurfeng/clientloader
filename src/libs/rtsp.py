@@ -1,17 +1,19 @@
-'''
-Created on 2014-2-20
-
-@author: fengjian
-'''
-import urlparse
-import socket
-import struct
+from urlparse import urlsplit
+import re
 import hashlib
 import base64
-import re
+import socket
+import select
+import struct
+import binascii
+import parse_ts
+import myrtcp
+import myrtp
+import myrdt
+import uuid
 import time
 import random
-import os
+from md5 import md5
 
 class rtsplib():
 
@@ -101,9 +103,21 @@ class rtsplib():
                 self.__etag = line[-1].strip()
                 self.response_status["ETag"] = self.__etag
             elif line[0] == "x-predecbufsize":
-                self.response_status["predecbufsize"] = line[-1].strip()
-            elif line == "":
-                break
+                self.response_status["predecbufsize"] = int(line[-1].strip())
+            elif line[0] == "Range":
+                self.response_status["Range"] = float(line[-1].strip().split("=")[-1].strip("-"))
+            elif line[0] == "Reconnect":
+                self.response_status["Reconnect"] = True
+            elif line[0] == "Content-length":
+                self.response_status["Content-length"] = int(line[-1].strip())
+            elif line[0] == "WWW-Authenticate":
+                self.response_status["auth-method"] = line[-1].split(" ")[0]
+                match_nonce = re.search(r"nonce=\"(\d+)\"", line[-1])
+                match_realm = re.search(r"realm=\"(\S+)\"", line[-1])
+                if match_nonce:
+                    self.response_status["nonce"] = match_nonce.group(0).split("=")[-1].strip("\"")
+                if match_realm:
+                    self.response_status["realm"] = match_realm.group(0).split("=")[-1].strip("\"")
     # ----------------------
     # Packet Sending Methods
     # ----------------------
@@ -135,7 +149,7 @@ class rtsplib():
         """ Tells the server to play the stream for you """
         if self.__session:
             headers['Session'] = self.__session
-        headers['Range'] = "npt=%s" % range
+        headers['Range'] = 'npt=%s' % range
         self.sendMethod('PLAY', target, headers)
 
     def sendGetParameter(self, target='*', headers=None):
@@ -150,12 +164,10 @@ class rtsplib():
             headers['Session'] = self.__session
         self.sendMethod('TEARDOWN', target, headers)
 
-
 def rn5_auth(username, realm, password, nonce, uuid):
     MUNGE_TEMPLATE ='%-.200s%-.200s%-.200sCopyright (C) 1995,1996,1997 RealNetworks, Inc.'
     authstr ="%-.200s:%-.200s:%-.200s" % (username, realm, password)
     first_pass = hashlib.md5(authstr).hexdigest()
-
     munged = MUNGE_TEMPLATE % (first_pass, nonce, uuid)
     return hashlib.md5(munged).hexdigest()
 
@@ -188,7 +200,7 @@ class RealChallenge():
         for i in range(0, len(RealChallenge.XOR_TABLE)):
             buf[8 + i] ^= RealChallenge.XOR_TABLE[i];
 
-        sum = hashlib.md5( ''.join([ chr(i) for i in buf ]) )
+        sum = md5( ''.join([ chr(i) for i in buf ]) )
 
         response = sum.hexdigest() + '01d0a8e3'
 
@@ -202,15 +214,15 @@ class RealChallenge():
     AV_WB32 = staticmethod(AV_WB32)
 
 
-class Rtsp():
+class myrtsp():
 
-    RTSPPort = 554
     RTSPProtocol = "tcp"
     RTPProtocol = "udp"
     Transport = "unicast"
     Payload = "RTP/AVP"
     RDT = False
     VOD = False
+    TsOverRTP = False
     GUID = "00000000-0000-0000-0000-000000000000"
     CLIENT_CHALLENGE = '9e26d33f2984236010ef6253fb1887f7'
     PLAYER_START_TIME = '[28/03/2003:22:50:23 00:00]'
@@ -218,7 +230,7 @@ class Rtsp():
     agent = 'RealMedia Player Version 6.0.9.1235 (linux-2.0-libc6-i386-gcc2.95)'
     clientID = 'Linux_2.4_6.0.9.1235_play32_RN01_EN_586'
     bandwidth = 999999
-
+    supported = "ABD-1.0"
 
     data_received = 0
     out_file = None
@@ -235,36 +247,75 @@ class Rtsp():
     sent_realchallenge2 = False
     sent_rn5_auth = False
     rn5_authdata = None
+    basic_authdata = None
+    recive_data = True
 
-    def __init__(self):
+    authentication = False
 
-        self.len = 10240
-        self.user_agent = "HelixAT.library.function.myrtsp"
+    def __init__(self, path, ip=None, port=None, server_name="server"):
+
+        parsed_path = urlsplit(path)
+        if parsed_path[0].lower() == "rtsp":
+            path = "%s?%s" % (parsed_path[2], parsed_path[3])
+            self.ip = parsed_path[1].split(":")[0]
+            self.rtspport = parsed_path[1].split(":")[-1]
+            self.rtspport = 554
+        if ip: self.ip = ip
+        if port: self.rtspport = int(port)
+        self.target = "rtsp://%s:%s%s" % (self.ip, self.rtspport, path)
+        self.setURL(self.target)
+        self.socket_buffer = 4096
+        self.user_agent = self.agent
         self.rtsplib = rtsplib()
-        self.session_server_list = list()
+        self.rtp_session_server_list = list()
+        self.rtcp_session_server_list = list()
 
-    def set_url(self, url):
+    def setURL(self, url):
         """ Parses given url into username, password, host, and port """
-        self.target = url
         self.url = url
-        parsed_url = urlparse.urlsplit(url)
+        parsed_url = urlsplit(url)
         self.scheme, self.netloc, self.path, self.query, self.fragment = parsed_url
+
         self.username = parsed_url.username
         self.password = parsed_url.password
-        self.rtspport = parsed_url.port
-        if self.rtspport is None:
-            self.rtspport = self.RTSPPort
-        if os.path.split(self.path)[-1].endswith(".rm"):
-            self.RDT = True
+
+    def receive_rtsp(self, continue_receive=True):
+
+        try:
+            #the_socket.setblocking(0)
+            total_data=[];data=''
+            while True:
+                r,w,x = select.select([self.rtsp_conn],[],[],0.05)
+                if len(r)>0:
+                    data = r[0].recv(self.socket_buffer)
+                    total_data.append(data)
+                else:
+                    break
+                if not continue_receive:
+                    break
+            if total_data:
+                return ''.join(total_data)
+            else:
+                return self.receive_rtsp()
+        except Exception, e:
+            return "%s" % e
+
+    def send_rtsp(self, smsg):
+
+        try:
+            self.rtsp_conn.send(smsg)
+            return True
+        except Exception, e:
+            return False
 
     def rtsp_conn(self):
 
         try:
             if self.RTSPProtocol == "tcp":
                 self.rtsp_conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            else:
+            elif self.RTSPProtocol == "udp":
                 self.rtsp_conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.rtsp_conn.connect((self.netloc, self.rtspport))
+            self.rtsp_conn.connect((self.ip, self.rtspport))
             return 0, "Make RTSP Connection Success"
         except Exception, e:
             return 100, "function-myrtsp-myrtsp-rtsp_conn: %s" % e
@@ -281,15 +332,17 @@ class Rtsp():
             Header['RegionData'] = '0'
             Header['ClientID'] = self.clientID
             Header['Pragma'] = 'initiate-session'
-        self.rtsplib.sendOptions("rtsp://%s:%s" % (self.netloc, self.rtspport), headers=Header)
+            Header["Supported"] = self.supported
+        self.rtsplib.sendOptions(self.target, headers=Header)
         return self.rtsplib.sendmsg
 
     def send_OPTIONS(self):
 
         smsg = self.gen_OPTIONS()
-        self.rtsp_conn.send(smsg)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
         time.sleep(0.1)
-        rmsg = self.rtsp_conn.recv(self.len)
+        rmsg = self.receive_rtsp()
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
@@ -307,51 +360,63 @@ class Rtsp():
             Header['RegionData'] = '0'
             Header['ClientID'] = self.clientID
             Header['SupportsMaximumASMBandwidth'] = '1'
-            Header['Language'] = 'en-US'
+            Header['Language'] = 'zh-CN, zh, *'
             Header['Require'] = 'com.real.retain-entity-for-setup'
             ##rn5 auth
             if self.rn5_authdata:
                 authstring ='RN5 '
                 self.rn5_authdata['username'] = self.username
-                self.rn5_authdata['GUID'] = '00000000-0000-0000-0000-000000000000'
+                self.rn5_authdata['GUID'] = str(uuid.uuid1())
                 self.rn5_authdata['response'] = \
-                             rn5_auth(nonce=self.rn5_authdata['nonce'],
-                             username=self.username,
-                             password=self.password,
-                             uuid=self.rn5_authdata['GUID'],
-                             realm=self.rn5_authdata['realm'])
+                         rn5_auth(nonce=self.rn5_authdata['nonce'],
+                         username=self.username,
+                         password=self.password,
+                         uuid=self.rn5_authdata['GUID'],
+                         realm=self.rn5_authdata['realm'])
                 ## a string like 'RN5 username="foo",realm="bla"...'
                 Header['Authorization'] = 'RN5 ' + ', '.join(
-                    ['%s="%s"' % (key, val) for key,val in self.rn5_authdata.items()])
-            if not self.rn5_authdata and self.username is not None:
-                authstr = '%s:%s' % (self.username,
-                                     self.password
-                                     if self.password else '')
-                authstr = base64.b64encode(authstr)
-                Header['Authorization'] = 'Basic %s' % authstr
+                        ['%s="%s"' % (key, val) for key,val in self.rn5_authdata.items()])
+        if self.basic_authdata:
+            authstr = '%s:%s' % (self.username,
+                                 self.password
+                                 if self.password else '')
+            authstr = base64.b64encode(authstr)
+            Header['Authorization'] = 'Basic %s' % authstr
         self.rtsplib.sendDescribe(self.target, headers=Header)
         return self.rtsplib.sendmsg
 
     def send_DESCRIBE(self):
 
         smsg = self.gen_DESCRIBE()
-        self.rtsp_conn.send(smsg)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
         time.sleep(0.1)
-        rmsg = self.rtsp_conn.recv(self.len)
-        self.rtsplib.handleResponse(rmsg)
+        rmsg_buffer = self.receive_rtsp()
+        tmp = rmsg_buffer.split("\r\n\r\n", 1)
+        header = tmp[0].strip()
+        self.sdpdata = tmp[-1].strip()
+        self.rtsplib.handleResponse(header)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
-            return 0, "Send DESCRIBE Request Success", rmsg
+            return 0, "Send DESCRIBE Request Success", self.sdpdata
+        elif status[0] == 401 and self.authentication:
+            self.rn5_authdata = {
+                                "realm":self.rtsplib.response_status["realm"],
+                                "nonce":self.rtsplib.response_status["nonce"]}
+            self.authentication = False
+            return self.send_DESCRIBE()
         else:
             return status[0], "Send DESCRIBE Request Failed, Recode Code: %s" % status[-1], 0
 
-    def gen_SETUP(self, streamid):
+    def gen_SETUP(self, id):
 
         while True:
-            port = random.randint(5000, 65535)
-            if self.RDT or not self.rtp_session_server_udp(port):
+            rtp_port = random.randrange(1026, 65535, 2)
+            rtcp_port = rtp_port + 1
+            if not self.rtp_session_server_udp(rtp_port) and \
+                                                        not self.rtcp_session_server_upd(rtcp_port):
                 break
-        client_port = "%s-%s" % (port, port + 1)
+        client_port = "%s-%s" % (rtp_port, rtcp_port)
         Header = {}
         Header["User-Agent"] = self.user_agent
         if self.RDT:
@@ -362,21 +427,22 @@ class Rtsp():
             Header['Transport'] = 'x-pn-tng/tcp;mode=play,rtp/avp/tcp;unicast;mode=play'
         else:
             Header['Transport'] = "%s;%s;client_port=%s" % (self.Payload, self.Transport, client_port)
-        self.rtsplib.sendSetup(self.target + "/" + streamid, headers=Header)
+        self.rtsplib.sendSetup(self.target + "/" + id, headers=Header)
         return self.rtsplib.sendmsg
 
-    def send_SETUP(self, streamid):
+    def send_SETUP(self, id):
 
-        smsg = self.gen_SETUP(streamid)
-        self.rtsp_conn.send(smsg)
-        rmsg = self.rtsp_conn.recv(self.len)
+        smsg = self.gen_SETUP(id)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
+        rmsg = self.receive_rtsp()
         time.sleep(0.1)
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
-            return 0, "Send SETUP Request Success"
+            return 0, "Send SETUP %s Request Success" % id
         else:
-            return status[0], "Send SETUP Request Failed, Recode Code: %s" % status[1]
+            return status[0], "Send SETUP %s Request Failed, Recode Code: %s" % (id, status[1])
 
     def gen_PLAY(self, Range):
 
@@ -385,20 +451,28 @@ class Rtsp():
         self.rtsplib.sendPlay(Range, self.target, headers=Header)
         return self.rtsplib.sendmsg
 
-    def send_PLAY(self, Range="0.000-"):
+    def send_PLAY(self, Range="0.000-", Bookmarking=None):
 
-        if Range.split("-")[-1] != "":
-            self.VOD = True
-            self.recive_buffer = float(Range.split("-")[-1]) * 1024
-        else:
-            self.recive_buffer = 1024
+        self.rdt_data_buffer = ""
         smsg = self.gen_PLAY(Range)
-        self.rtsp_conn.send(smsg)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
         time.sleep(0.1)
-        rmsg = self.rtsp_conn.recv(300)
+        rmsg_buffer = self.receive_rtsp(False)
+        rmsg = rmsg_buffer.split("\r\n\r\n")[0].strip()
+        self.rdt_data_buffer = rmsg_buffer.split("\r\n\r\n")[-1]
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
+            if Bookmarking:
+                if self.rtsplib.response_status.get("Range", None) != None:
+                    start_time = self.rtsplib.response_status["Range"]
+                    if abs(int(start_time)-int(Bookmarking)) > 2:
+                        return 2, "Bookmarking options failed, should be start with %s not %s" % (Bookmarking, start_time)
+                    else:
+                        return 0, "Send Play Success, Bookmaring start with %s" % Bookmarking
+                else:
+                    return 3, "Send Play Success, Bookmarking request failed, need Range in PLAY response msg"
             return 0, "Send PLAY Request Success"
         else:
             return status[0], "Send PLAY Request Failed, Recode Code: %s" % status[1]
@@ -407,18 +481,18 @@ class Rtsp():
 
         Header = {}
         Header["User-Agent"] = self.user_agent
-        #Header["Content-Length"] = 2048
         Header["SetDeliveryBandwidth"] = "Bandwidth=%s;BackOff=0" % self.bandwidth
-        #Header["Subscribe"] = "stream=0;rule=0,stream=0;rule=1,stream=1;rule=0,stream=1;rule=1"
+        Header["Subscribe"] = "stream=0;rule=0,stream=0;rule=1,stream=1;rule=0,stream=1;rule=1"
         self.rtsplib.sendSetParameter(self.target, headers=Header)
         return self.rtsplib.sendmsg
 
     def send_SETPARAMETER(self):
 
         smsg = self.gen_SETPARAMETER()
-        self.rtsp_conn.send(smsg)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
         time.sleep(0.1)
-        rmsg = self.rtsp_conn.recv(1024)
+        rmsg = self.receive_rtsp()
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
@@ -436,9 +510,10 @@ class Rtsp():
     def send_GETPARAMETER(self):
 
         smsg = self.gen_GETPARAMETER()
-        self.rtsp_conn.send(smsg)
+        if not self.send_rtsp(smsg):
+            return 1, "Send Msg To Helix Server Failed"
         time.sleep(0.1)
-        rmsg = self.rtsp_conn.recv(self.len)
+        rmsg = self.receive_rtsp()
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
@@ -457,9 +532,10 @@ class Rtsp():
 
         try:
             smsg = self.gen_TEARDOWN()
-            self.rtsp_conn.send(smsg)
+            if not self.send_rtsp(smsg):
+                return 1, "Send Msg To Helix Server Failed"
             time.sleep(0.1)
-            rmsg = self.rtsp_conn.recv(self.len)
+            rmsg = self.receive_rtsp()
             self.rtsplib.handleResponse(rmsg)
             status = self.rtsplib.response_status["status"]
             if status[0] == 200:
@@ -471,99 +547,138 @@ class Rtsp():
         finally:
             self.rtsp_conn.close()
 
+    def rtp_session_server_multicast_udp(self, ip, port):
+
+        try:
+            total_data=[];data=''
+            COUNTER = 20
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.bind(('', port))
+            mreq = struct.pack("=4sl", socket.inet_aton(ip), socket.INADDR_ANY)
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+            while COUNTER:
+                r,w,x = select.select([s],[],[],0.05)
+                if len(r)>0:
+                    data = r[0].recv(self.socket_buffer)
+                    total_data.append(data)
+                else:
+                    break
+                COUNTER -= 1
+            return 0, "Receive Multicast Stream IP: %s, Port: %s Success" % (ip, port)
+        except socket.timeout, e:
+            return 1, "Recive RTP Session TimeOut"
+        except Exception, e:
+            return 100, "function-myrtsp-myrtsp-rtp_session_server_multicast_udp: %s" % e
+        finally:
+            s.close()
+
     def rtp_session_server_udp(self, port):
 
         try:
             conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             conn.bind(('', port))
-            self.session_server_list.append(conn)
+            #conn.setblocking(False)
+            #conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.rtp_session_server_list.append(conn)
+            return 
+        except socket.error, e:
+            return 1
+
+    def rtcp_session_server_upd(self, port):
+
+        try:
+            conn = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            conn.bind(('', port))
+            #conn.setblocking(False)
+            #conn.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.rtcp_session_server_list.append(conn)
             return 0
         except socket.error, e:
             return 1
 
-    def recive_stream(self):
-        
-        if self.RDT is True:
-            return self.recive_rdt()
-        else:
-            return self.recive_rtp()
+    def revice_rtp(self):
 
-    def recive_rtp(self):
-
+        rtcp = myrtcp.RTCPDatagram()
+        rtp = myrtp.RTPDatagram()
         keeplive = self.rtsplib.response_status["Timeout"]
         count = 0
         try:
             while True:
                 count += 1
+                for rtcp_conn in self.rtcp_session_server_list:
+                    rtcp_rmsg, address = rtcp_conn.recvfrom(self.socket_buffer)
+                    rtcp.Datagram = rtcp_rmsg
+                    rtcp.parse()
+                    smsg = rtcp.generateRR()
+                    rtcp_conn.sendto(smsg, address)
+                    if rtcp.GoodBye:
+                        return 0, "Recive GoodBye Msg, End Connection"
                 if keeplive - 10 == count:
                     self.send_GETPARAMETER()
                     count = 0
-                for j in self.session_server_list:
-                    j.settimeout(keeplive)
-                    rmsg, address = j.recvfrom(int(self.recive_buffer))
-                time.sleep(1)
-                if self.VOD:
-                    break
+                for rtp_conn in self.rtp_session_server_list:
+                    rtp_rmsg, address = rtp_conn.recvfrom(self.socket_buffer)
+                    if len(rtp_rmsg)>0:
+                        rtp.parse(rtp_rmsg)
+                        if self.TsOverRTP:
+                            ts_parser = parse_ts.TSParser()
+                            ts_package = re.findall(r'.{188}', rtp.Payload, re.DOTALL)
+                            for i in ts_package:
+                                if not ts_parser.isTsPackage(i):
+                                    return 2, "Ts Package Is Not Standard"
+                time.sleep(0.1)
             return 0, "Recive RTP Package Success"
         except socket.timeout, e:
             return 1, "Recive RTP Session TimeOut"
         finally:
-            self.send_TEARDOWN()
-            for u in self.session_server_list:
+            for u in self.rtp_session_server_list:
+                u.close()
+            for u in self.rtcp_session_server_list:
                 u.close()
    
-    def recive_rdt(self):
+    def revice_rdt(self):
 
+        rdt = myrdt.RDTDatagram()
         count = 0
         keeplive = self.rtsplib.response_status["Timeout"]
+        data_buffer_size = self.rtsplib.response_status.get("predecbufsize", 0)
         try:
             while True:
                 count += 1
                 if keeplive-10 == count:
                     self.send_GETPARAMETER()
                     count = 0
-                rmsg = self.rtsp_conn.recv(self.recive_buffer)
+                rmsg = self.receive_rtsp(False)
+                if self.rdt_data_buffer:
+                    rmsg = "%s%s" % (self.rdt_data_buffer, rmsg)
+                    self.rdt_data_buffer = ""
+                if rmsg == "":
+                    return 0, "Receive RDT Package Failed, Not RDT Package Receiced"
+                ## can't understand the rdt package TODO ##
+                rdt.parse(self.sdpdata, rmsg)
+                if data_buffer_size - rdt.data_size < 0:
+                    return 0, "End Recive Streaming"
                 time.sleep(1)
-                if self.VOD:
-                    break
             return 0, "Recive RDT Package Success"
         except socket.timeout, e:
             return 1, "Revice RDT Session TimeOut"
         finally:
-            self.send_TEARDOWN()
-            for u in self.session_server_list:
-                u.close()
+            rdt.close()
 
-    def get_streamid_from_sdp(self, lines):
-        
-        streamid_list = list()
-        for line in lines.split("\r\n"):
-            match_streamid = re.search('streamid=(\d)', line)
-            if match_streamid:
-                streamid_list.append(match_streamid.group(0))
-        return streamid_list
-    
-    def get_npt_from_sdp(self, lines):
-        
-        npt = "0.000-"
-        for line in lines.split("\n"):
-            if line.startswith("a=range:"):
-                npt = line.split(":")[-1].split("=")[-1].strip("\r")
-                break
-        return npt.strip("\r")
+    def stop(self):
+
+        RUN = False
+
 
 if __name__ == "__main__":
 
-    R = Rtsp()
-    R.set_url("rtsp://192.168.36.159/broadcast/live")
-    #R.RDT = True
-    #R.VOD = True
+    R = myrtsp("rtsp://192.168.36.161:554/segsrc/meet.mp4")
     R.rtsp_conn()
     print R.send_OPTIONS()
-    sdp = R.send_DESCRIBE()[-1]
-    for i in R.get_streamid_from_sdp(sdp):
-        R.send_SETUP(i)
+    print R.send_DESCRIBE()
+    print R.send_SETUP("streamid=1")
+    print R.send_SETUP("streamid=2")
     print R.send_SETPARAMETER()
-    print R.send_PLAY()
-    print R.revice_rdt(40)
+    print R.send_PLAY("0.000-")
+    print R.revice_rtp()
     print R.send_TEARDOWN()

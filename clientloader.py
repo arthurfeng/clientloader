@@ -13,9 +13,10 @@ import re
 import sys
 import uuid
 import time
+import xmlrpclib
 import urlparse
-import BaseHTTPServer
-from SimpleHTTPServer import SimpleHTTPRequestHandler
+from SimpleXMLRPCServer import SimpleXMLRPCServer
+from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 
 try:
     from cStringIO import StringIO
@@ -25,8 +26,14 @@ except ImportError:
 CLIENTSTATUS = dict()
 X_PLOT = list()
 Y_PLOT = list()
-HTTP_PROTOCOL = "HTTP/1.0"
-HTTP_PORT = 8888
+RPC_PORT = 8000
+USERNAME = "xing"
+PASSWD = "123"
+AUTH = False
+
+class RequestHandler(SimpleXMLRPCRequestHandler):
+    rpc_paths = ('/RPC2',)
+
 
 def add_flash_client(task_uuid, url):
     
@@ -72,8 +79,10 @@ def add_real_client(task_uuid, url):
     else:
         add_real_client(url)
 
-def start_client(task_uuid, url, client_number):
+def start_client(url, client_number):
     
+    task_uuid = str(uuid.uuid1())
+    CLIENTSTATUS[task_uuid] = {}
     if re.match("rtmp://", url):
         for i in range(client_number):
             add_flash_client(task_uuid, url)
@@ -86,9 +95,12 @@ def start_client(task_uuid, url, client_number):
     elif re.match("dashgen", url) or re.search("bmff", url) or re.search("mpd", url):
         for i in range(client_number):
             add_dash_client(task_uuid, url)
+    return check_clients_status(task_uuid)
 
 def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
     
+    if task_uuid not in CLIENTSTATUS.keys():
+        return 0
     failed_client_number = 0
     for uuid in CLIENTSTATUS[task_uuid].keys():
         client = CLIENTSTATUS[task_uuid][uuid]
@@ -101,12 +113,15 @@ def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
             
 def check_clients_number(task_uuid):
     
+    if task_uuid not in CLIENTSTATUS.keys():
+        return 0
     return len(CLIENTSTATUS[task_uuid].keys())
 
 def check_alive_clients(task_uuid):
     
+    if task_uuid not in CLIENTSTATUS.keys():
+        return 0
     alive_client_number = 0
-    
     for client in CLIENTSTATUS[task_uuid].values():
         if client.is_alive():
             alive_client_number += 1
@@ -115,6 +130,17 @@ def check_alive_clients(task_uuid):
 def check_taskid_number():
     
     return len(CLIENTSTATUS.keys())
+
+def check_clients_status(task_uuid, restart_client_on_failure=False):
+    
+    if task_uuid not in CLIENTSTATUS.keys():
+        return 0,0,0,0
+    return task_uuid, check_stop_clients_number(task_uuid, restart_client_on_failure), \
+        check_alive_clients(task_uuid), check_clients_number(task_uuid)
+
+def check_task_status():
+    
+    return ",".join(CLIENTSTATUS.keys())
 
 def stop_client(client):
     
@@ -126,6 +152,8 @@ def stop_client(client):
 
 def stop_clients(task_uuid, clients_number=0, random_stop=1, client_type=None):
     
+    if task_uuid not in CLIENTSTATUS.keys():
+        return False
     if random_stop and not client_type:
         TIMER = len(CLIENTSTATUS[task_uuid].keys())
         while TIMER:
@@ -133,20 +161,23 @@ def stop_clients(task_uuid, clients_number=0, random_stop=1, client_type=None):
             if stop_client(client):
                 clients_number -= 1
             if clients_number == 0:
-                return
+                return True
             TIMER -= 1
     for client in CLIENTSTATUS[task_uuid].values():
         if client_type and client.is_alive() and client.name.split(",")[0].lower() == client_type:
             if stop_client(client):
                 clients_number -= 1
         if clients_number == 0:
-            return
+            return True
 
 def stop_force(task_uuid):
     
+    if task_uuid not in CLIENTSTATUS.keys():
+        return False
     for client in CLIENTSTATUS[task_uuid].values():
         stop_client(client)
     CLIENTSTATUS.clear()
+    return True
     
 def clear_clients():
     
@@ -154,141 +185,25 @@ def clear_clients():
         for client in clientid.values():
             stop_client(client)
     CLIENTSTATUS.clear()
+    return True
 
-def check_taskid():
-    
-    return ",".join(CLIENTSTATUS.keys())
-
-def do_plot():
-    
-    X_PLOT.append(time.strftime("%H:%M:%S", time.localtime())) 
-    plt.title(u"Clients Status")
-    plt.xlabel(u"Time: %s" %  time.strftime("%Y-%m-%d", time.localtime()) )
-    plt.ylabel(u"Number")
-    for i in range(len(CLIENTSTATUS.keys())):
-        pass
-    y1=[12,3,4,5,6]
-    y2=[2,3,45,6,7]
-    plt.plot(X_PLOT,y1)
-    plt.plot(X_PLOT,y2)
-    plt.show()
-
-class ClientServer(SimpleHTTPRequestHandler):
-    
-    __data__buffer = ""
-    
-    def do_GET(self):
-        """Serve a GET request."""
-        f = self.send_data()
-        if f:
-            self.copyfile(f, self.wfile)
-            f.close()
-            
-    def parse_url(self):
-        
-        task_uuid = None
-        client_url = None
-        client_number = 1
-        client_type = None
-        random_stop = True
-        restart_on_failed = False
-        parsed_url = urlparse.urlparse(self.path)
-        request_type = os.path.split(parsed_url.path)[-1]
-        for query in parsed_url.query.split("&"):
-            parameter = query.split("=")
-            if parameter[0].lower() == "url":
-                client_url = parameter[-1]
-            elif parameter[0].lower() == "number":
-                client_number = int(parameter[-1])
-            elif parameter[0].lower() == "randomstop":
-                random_stop = int(parameter[-1])
-            elif parameter[0].lower() == "clienttype":
-                client_type = parameter[-1]
-            elif parameter[0].lower() == "restart":
-                restart_on_failed = int(parameter[-1])
-            elif parameter[0].lower() == 'uuid':
-                task_uuid = parameter[-1]
-        if request_type == "add_client.html":
-            if task_uuid is None:
-                task_uuid = str(uuid.uuid1())
-            CLIENTSTATUS[task_uuid] = {}
-            start_client(task_uuid, client_url, client_number)
-            self.__data_buffer = "%s,%s,%s\n" % (task_uuid, check_alive_clients(task_uuid), client_url)
-            return True
-        elif request_type == "del_client.html":
-            if not task_uuid:
-                return False
-            stop_clients(task_uuid, client_number, random_stop, client_type)
-            self.__data_buffer = "%s,%s\n" % (task_uuid, check_stop_clients_number(task_uuid, False))
-            return True
-        elif request_type == "status_client.html":
-            if not task_uuid:
-                return False
-            failed_number = check_stop_clients_number(task_uuid, restart_on_failed)
-            alive_number = check_alive_clients(task_uuid)
-            all_number = check_clients_number(task_uuid)
-            self.__data_buffer = "%s,%s,%s,%s\n" % (task_uuid, failed_number, alive_number, all_number)
-            return True
-        elif request_type == "clear_client.html":
-            clear_clients()
-            self.__data_buffer = "%s\n" % (check_taskid_number())
-            return True
-        elif request_type == "query_client.html":
-            self.__data_buffer = "%s" % check_taskid()
-            return True
-        return False
-        
-    def send_data(self):
-        """Common code for GET and HEAD commands.
-
-        This sends the response code and MIME headers.
-
-        Return value is either a file object (which has to be copied
-        to the outputfile by the caller unless the command was HEAD,
-        and must be closed by the caller under all circumstances), or
-        None, in which case the caller has nothing further to do.
-
-        """
-        path = self.translate_path(self.path)
-        f = None
-        try:
-            # Always read in binary mode. Opening files in text mode may cause
-            # newline translations, making the actual size of the content
-            # transmitted *less* than the content-length!
-            f = open(path, 'rb')
-            f.close()
-        except IOError:
-            self.send_error(404, "File not found")
-            return None
-        f = StringIO()
-        self.send_response(200)
-        if not self.parse_url():
-            return None
-        f.write(self.__data_buffer)
-        length = f.tell()
-        f.seek(0)
-        encoding = sys.getfilesystemencoding()
-        self.send_header("Content-type", "text/html; charset=%s" % encoding)
-        self.send_header("Content-Length", str(length))
-        self.end_headers()
-        return f
-
-def start(HandlerClass = ClientServer,
-         ServerClass = BaseHTTPServer.HTTPServer):
-    server_address = ('', HTTP_PORT)
-
-    HandlerClass.protocol_version = HTTP_PROTOCOL
-    httpd = ServerClass(server_address, HandlerClass)
-
-    sa = httpd.socket.getsockname()
-    print "Serving HTTP on", sa[0], "port", sa[1], "..."
-    httpd.serve_forever()
+def doServer():
+    server = SimpleXMLRPCServer(("localhost", RPC_PORT), allow_none=True)
+                            #requestHandler=RequestHandler)
+    print "Listening on port %s..." % RPC_PORT
+    server.register_function(start_client, "start_client")
+    server.register_function(check_clients_status, "check_clients_status")
+    server.register_function(check_task_status, "check_task_status")
+    server.register_function(stop_clients, "stop_clients")
+    server.register_function(stop_force, "stop_force")
+    server.register_function(clear_clients, "clear_clients")
+    server.serve_forever()
 
 if __name__ == '__main__':
     
     try:
         
-        start()
+        doServer()
     except Exception, e:
         print e
     finally:

@@ -3,7 +3,8 @@ Created on 2014-2-20
 
 @author: fengjian
 '''
-from libs import rtsp
+from libs import rtsp, parse_sdp
+import re
 
 class RTSPError(Exception):
     
@@ -16,22 +17,31 @@ class Real():
     
     def play(self, url):
         
-        rtsp_client = rtsp.Rtsp()
-        rtsp_client.set_url(url)
-        rtsp_client.rtsp_conn()
-        result = rtsp_client.send_OPTIONS()
-        if result[0]:
-            raise RTSPError(result[0], url)
-        sdp = rtsp_client.send_DESCRIBE()[-1]
-        for i in rtsp_client.get_streamid_from_sdp(sdp):
-            rtsp_client.send_SETUP(i)
-        npt = rtsp_client.get_npt_from_sdp(sdp)
-        rtsp_client.send_SETPARAMETER()
-        rtsp_client.send_PLAY(npt)
-        result = rtsp_client.recive_stream()
-        if result[0]:
-            raise RTSPError(result[1], url)
-        return 1
+        RTSP = rtsp.myrtsp(url)
+        if url.split("/")[-1].endswith(".rm"):
+            RTSP.RDT = True
+        if re.search(r"/tsrtp/", url):
+            RTSP.TsOverRTP = True
+        result, message = RTSP.rtsp_conn()
+        result, message = RTSP.send_OPTIONS()
+        if result:
+            raise RTSPError(result, url)
+        result, message, sdp = RTSP.send_DESCRIBE()
+        sdp_parser = parse_sdp.Sdpplin(sdp)
+        try: start_time = sdp_parser['StartTime']
+        except: start_time = "0.000-"
+        for i in sdp_parser.streams:
+            streamid=i["streamid"]
+            result, message = RTSP.send_SETUP("streamid=%s" % streamid)
+        result, message = RTSP.send_SETPARAMETER()
+        result, message = RTSP.send_PLAY(start_time)
+        if RTSP.RDT:
+            result, message = RTSP.revice_rdt()
+        else:
+            result, message = RTSP.revice_rtp()
+        if result:
+            raise RTSPError(result, url)
+        RTSP.send_TEARDOWN()
 
 def connect(url):
     
