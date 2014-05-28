@@ -3,7 +3,7 @@ Created on 2014-2-21
 
 @author: fengjian
 '''
-from src import flash, hls, real, dash
+from src import flash, hls, real, dash, mms
 from src.libs import mythread
 #import matplotlib.pyplot as plt
 import multiprocessing
@@ -79,10 +79,24 @@ def add_real_client(task_uuid, url):
     else:
         add_real_client(url)
 
-def start_client(url, client_number):
+def add_mms_client(task_uuid, url):
     
-    task_uuid = str(uuid.uuid1())
-    CLIENTSTATUS[task_uuid] = {}
+    client = multiprocessing.Process(target=mms.connect, args=(url,), name="mms,%s" % url)
+    client.start()
+    if client.is_alive():
+        client_uuid = str(uuid.uuid1())
+        CLIENTSTATUS[task_uuid][client_uuid] = client
+        time.sleep(0.5)
+    else:
+        add_mms_client(url)
+########################################################### OPEN FUNCTION ###########################################################
+
+def start_client(task_uuid, url, client_number):
+    
+    if not task_uuid:
+        task_uuid = str(uuid.uuid1())
+    if not task_uuid in CLIENTSTATUS.keys():
+        CLIENTSTATUS[task_uuid] = {}
     if re.match("rtmp://", url):
         for i in range(client_number):
             add_flash_client(task_uuid, url)
@@ -95,6 +109,9 @@ def start_client(url, client_number):
     elif re.match("dashgen", url) or re.search("bmff", url) or re.search("mpd", url):
         for i in range(client_number):
             add_dash_client(task_uuid, url)
+    elif re.match("mms://", url):
+        for i in range(client_number):
+            add_mms_client(task_uuid, url)
     return check_clients_status(task_uuid)
 
 def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
@@ -113,6 +130,11 @@ def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
             
 def check_clients_number(task_uuid):
     
+    if not task_uuid:
+        num = 0
+        for i in CLIENTSTATUS.keys():
+            num += len(CLIENTSTATUS[i].keys())
+        return num
     if task_uuid not in CLIENTSTATUS.keys():
         return 0
     return len(CLIENTSTATUS[task_uuid].keys())
@@ -140,7 +162,7 @@ def check_clients_status(task_uuid, restart_client_on_failure=False):
 
 def check_task_status():
     
-    return ",".join(CLIENTSTATUS.keys())
+    return CLIENTSTATUS.keys()
 
 def stop_client(client):
     
@@ -176,7 +198,8 @@ def stop_force(task_uuid):
         return False
     for client in CLIENTSTATUS[task_uuid].values():
         stop_client(client)
-    CLIENTSTATUS.clear()
+    CLIENTSTATUS.pop(task_uuid)
+    #print CLIENTSTATUS.keys()
     return True
     
 def clear_clients():
@@ -188,7 +211,7 @@ def clear_clients():
     return True
 
 def doServer():
-    server = SimpleXMLRPCServer(("localhost", RPC_PORT), allow_none=True)
+    server = SimpleXMLRPCServer(("192.168.36.16", RPC_PORT), allow_none=True)
                             #requestHandler=RequestHandler)
     print "Listening on port %s..." % RPC_PORT
     server.register_function(start_client, "start_client")
@@ -197,6 +220,7 @@ def doServer():
     server.register_function(stop_clients, "stop_clients")
     server.register_function(stop_force, "stop_force")
     server.register_function(clear_clients, "clear_clients")
+    server.register_function(check_clients_number, "check_clients_number")
     server.serve_forever()
 
 if __name__ == '__main__':

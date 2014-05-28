@@ -53,27 +53,29 @@ class HLS(object):
     def play(self, url):
         
         http_request = http.Http()
-        result, data, parsed_url = http_request.get1(url)
-        if not result:
-            raise HLSError(result, url)
-        single_urls = self.multi_m3u8(data)
-        if single_urls:
-            single_url = http_request.urljoin(parsed_url, random.choice(single_urls))
-            self.play(single_url)
-        segment_url = self.single_m3u8(data)
-        for segurl in segment_url:
-            match_to_be_played_segment = re.search('\d+', segurl)
-            to_be_played_segment_number = int(match_to_be_played_segment.group(0))
-            if to_be_played_segment_number > self.played_segment_number:
-                #print to_be_played_segment_number
-                request_url = http_request.urljoin(parsed_url, segurl)
-                if not http_request.get1(request_url)[0]:
-                    raise HLSError(result, request_url)
-            self.played_segment_number = to_be_played_segment_number
-        if self.keep_play:
-            time.sleep(self.target_duration)
-            self.play(url)
-        return 1
+        while True:
+            result, data, parsed_url = http_request.get1(url)
+            if not result:
+                raise HLSError(result, url)
+            single_urls = self.multi_m3u8(data)
+            if single_urls:
+                single_url = http_request.urljoin(parsed_url, random.choice(single_urls))
+                self.play(single_url)
+            segment_url = self.single_m3u8(data)
+            for segurl in segment_url:
+                match_to_be_played_segment = re.search('\d+', segurl.split("/")[-1])
+                to_be_played_segment_number = int(match_to_be_played_segment.group(0))
+                if to_be_played_segment_number > self.played_segment_number:
+                    #print to_be_played_segment_number
+                    request_url = http_request.urljoin(parsed_url, segurl)
+                    if not http_request.get1(request_url)[0]:
+                        raise HLSError(result, request_url)
+                self.played_segment_number = to_be_played_segment_number
+            if self.keep_play:
+                time.sleep(self.target_duration)
+                #self.play(url)
+            else:
+                return 1
             
 def connect(url):
     
