@@ -26,9 +26,9 @@ class Real():
             RTSP.TsOverRTP = True
         result, message = RTSP.rtsp_conn()
         result, message = RTSP.send_OPTIONS()
+        result, message, sdp = RTSP.send_DESCRIBE()
         if result:
             raise RTSPError(result, url)
-        result, message, sdp = RTSP.send_DESCRIBE()
         sdp_parser = parse_sdp.Sdpplin(sdp)
         try: start_time = sdp_parser['StartTime']
         except: start_time = "0.000-"
