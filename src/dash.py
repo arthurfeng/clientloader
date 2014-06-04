@@ -3,10 +3,12 @@ Created on 2014-5-6
 
 @author: fengjian
 '''
-from libs import http, parse_dash
+from libs import http, parse_dash, log
 import time
 import re
 import random
+
+Logger = log.Log()
 
 class DASHError(Exception):
     
@@ -33,9 +35,11 @@ class DASH(object):
         http_request = http.Http()
         while True:
             result, data, parsed_url = http_request.get1(url)
-            if not result:
+            if result != 200:
                 raise DASHError(result, url)
             result, message, segment_urls, dash_profile = parse_dash_playlist.start(data)
+            if not segment_urls:
+                raise DASHError(100, "Parse DASH MPD file Error")
             segment_url = random.choice(segment_urls)
             for segurl in segment_url:
                 match_to_be_played_segment = re.search('\d+', segurl.split("/")[-1])
@@ -43,12 +47,12 @@ class DASH(object):
                 if to_be_played_segment_number > self.played_segment_number:
                     #print to_be_played_segment_number
                     request_url = http_request.urljoin(parsed_url, segurl)
-                    if not http_request.get1(request_url)[0]:
+                    result, data, useless_url = http_request.get1(request_url)
+                    if result != 200:
                         raise DASHError(result, request_url)
                 self.played_segment_number = to_be_played_segment_number
             if parse_dash_playlist.KEEPPLAY:
                 time.sleep(int(parse_dash_playlist.TIMESLEEP))
-                #self.play(url)
             else:
                 return 1
     
@@ -58,7 +62,7 @@ def connect(url):
         DASH_Client = DASH()
         DASH_Client.play(url)
     except DASHError, error:
-        print "%s:%s" % (error.response, error.url)
+        Logger.printf("%s:%s" % (error.response, error.url), "error")
 
 if __name__ == "__main__":
     

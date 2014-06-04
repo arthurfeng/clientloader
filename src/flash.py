@@ -37,7 +37,9 @@ want to work on individual resource objects, use the open method and the returne
 import os, sys, traceback, time, urlparse, socket
 from libs.rtmp import Protocol, Message, Command, ConnectionClosed, Stream, FLV
 from libs.amf import Object
-from libs import multitask
+from libs import multitask, log
+
+Logger = log.Log()
 
 _debug = False
 MULTITASK = multitask.TaskManager()

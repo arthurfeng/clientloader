@@ -3,8 +3,10 @@ Created on 2014-2-20
 
 @author: fengjian
 '''
-from libs import rtsp, parse_sdp
+from libs import rtsp, parse_sdp, log
 import re
+
+Logger = log.Log()
 
 class RTSPError(Exception):
     
@@ -49,7 +51,7 @@ def connect(url):
         real_client = Real()
         real_client.play(url)
     except RTSPError, error:
-        print "%s:%s" % (error.response, error.url)
+        Logger.printf("%s:%s" % (error.response, error.url), "error")
 
 if __name__ == '__main__':
     

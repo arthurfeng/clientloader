@@ -3,10 +3,12 @@ Created on 2014-2-20
 
 @author: fengjian
 '''
-from libs import http, multitask
+from libs import http, log
 import time
 import re
 import random
+
+Logger = log.Log()
 
 class HLSError(Exception):
     
@@ -55,7 +57,7 @@ class HLS(object):
         http_request = http.Http()
         while True:
             result, data, parsed_url = http_request.get1(url)
-            if not result:
+            if result != 200:
                 raise HLSError(result, url)
             single_urls = self.multi_m3u8(data)
             if single_urls:
@@ -68,12 +70,12 @@ class HLS(object):
                 if to_be_played_segment_number > self.played_segment_number:
                     #print to_be_played_segment_number
                     request_url = http_request.urljoin(parsed_url, segurl)
-                    if not http_request.get1(request_url)[0]:
+                    result, data, useless_url = http_request.get1(request_url)
+                    if result != 200:
                         raise HLSError(result, request_url)
                 self.played_segment_number = to_be_played_segment_number
             if self.keep_play:
                 time.sleep(self.target_duration)
-                #self.play(url)
             else:
                 return 1
             
@@ -83,7 +85,7 @@ def connect(url):
         HLS_Client = HLS()
         HLS_Client.play(url)
     except HLSError, error:
-        print "%s:%s" % (error.response, error.url)
+        Logger.printf("%s:%s" % (error.response, error.url), 'error')
 
 if __name__ == "__main__":
     

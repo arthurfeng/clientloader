@@ -3,7 +3,10 @@ Created on 2014-2-21
 
 @author: fengjian
 '''
-from src import flash, hls, real, dash, mms
+try:
+    from src import flash, hls, real, dash, mms
+except:
+    from src import flash, hls, real, dash
 from src.libs import mythread
 #import matplotlib.pyplot as plt
 import multiprocessing

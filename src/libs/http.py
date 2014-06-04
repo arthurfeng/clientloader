@@ -47,15 +47,15 @@ class Http(object):
                     content_length = response.getheader('content_length', None)
                     if len(data) != content_length:
                         return self.get1(url)
-                return (1, data, url)
+                return (200, data, url)
             elif response.status == 302:
                 refer_url = response.getheader('location')
                 return self.get1(refer_url)
             else:
-                return (0, None, None)
+                return (response.status, None, url)
         except Exception as e:
-            print e
-            return (0, None,None)
+            #print e
+            return (0, e, url)
         finally:
             if http_conn:
                 http_conn.close()
@@ -72,14 +72,12 @@ class Http(object):
             request = urllib2.Request(url=url, headers=header)
             response = urllib2.urlopen(request)
             data = response.read()
-            return (1, data)
+            return (response, data)
         except urllib2.URLError, e:
-            print e
-            return (0, None)
+            return (0, e)
         except urllib2.HTTPError, e:
-            print e
-            return (0, None)
-            
+            return (0, e)
+
     def urljoin(self, base, url):
         
         return urlparse.urljoin(base, url)

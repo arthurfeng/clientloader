@@ -620,12 +620,12 @@ class myrtsp():
                     rtp_rmsg, address = rtp_conn.recvfrom(self.socket_buffer)
                     if len(rtp_rmsg)>0:
                         rtp.parse(rtp_rmsg)
-                        if self.TsOverRTP:
-                            ts_parser = parse_ts.TSParser()
-                            ts_package = re.findall(r'.{188}', rtp.Payload, re.DOTALL)
-                            for i in ts_package:
-                                if not ts_parser.isTsPackage(i):
-                                    return 2, "Ts Package Is Not Standard"
+#                         if self.TsOverRTP:
+#                             ts_parser = parse_ts.TSParser()
+#                             ts_package = re.findall(r'.{188}', rtp.Payload, re.DOTALL)
+#                             for i in ts_package:
+#                                 if not ts_parser.isTsPackage(i):
+#                                     return 2, "Ts Package Is Not Standard"
                 time.sleep(0.1)
             return 0, "Recive RTP Package Success"
         except socket.timeout, e:
@@ -662,6 +662,12 @@ class myrtsp():
             return 0, "Recive RDT Package Success"
         except socket.timeout, e:
             return 1, "Revice RDT Session TimeOut"
+        except KeyError, e:
+            # FOR SureStream live source, we can't parse it, so raise a KeyError TODO
+            return 0, "Recive RDT Success"
+        except IndexError, e:
+            # FOR SureStream live source, we can't parse it, so raise a IndexError TODO
+            return 0, "Recive RDT Success"
         finally:
             rdt.close()
 

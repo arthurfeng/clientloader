@@ -1,4 +1,6 @@
-from libs import libmms
+from libs import libmms, log
+
+Logger = log.Log()
 
 class MMSError(Exception):
     
@@ -31,4 +33,4 @@ def connect(url):
         MMS_Client = MMS()
         MMS_Client.play(url)
     except MMSError, error:
-        print "%s:%s" % (error.response, error.url)
+        Logger.printf("%s:%s" % (error.response, error.url), "error")
