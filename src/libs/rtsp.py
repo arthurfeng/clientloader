@@ -256,7 +256,10 @@ class myrtsp():
 
         parsed_path = urlsplit(path)
         if parsed_path[0].lower() == "rtsp":
-            path = "%s?%s" % (parsed_path[2], parsed_path[3])
+            if parsed_path[3]:
+                path = "%s?%s" % (parsed_path[2], parsed_path[3])
+            else:
+                path = "%s" % parsed_path[2]
             self.ip = parsed_path[1].split(":")[0]
             self.rtspport = parsed_path[1].split(":")[-1]
             self.rtspport = 554
