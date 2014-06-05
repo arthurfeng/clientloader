@@ -252,7 +252,7 @@ class myrtsp():
 
     authentication = False
 
-    def __init__(self, path, ip=None, port=None, server_name="server"):
+    def __init__(self, path, ip=None, port=None):
 
         parsed_path = urlsplit(path)
         if parsed_path[0].lower() == "rtsp":
@@ -392,7 +392,7 @@ class myrtsp():
 
         smsg = self.gen_DESCRIBE()
         if not self.send_rtsp(smsg):
-            return 1, "Send Msg To Helix Server Failed"
+            return 1, "Send Msg To Helix Server Failed", 0
         time.sleep(0.1)
         rmsg_buffer = self.receive_rtsp()
         tmp = rmsg_buffer.split("\r\n\r\n", 1)
@@ -633,6 +633,8 @@ class myrtsp():
             return 0, "Recive RTP Package Success"
         except socket.timeout, e:
             return 1, "Recive RTP Session TimeOut"
+        except:
+            return 0, "Receive RTP Package Success"
         finally:
             for u in self.rtp_session_server_list:
                 u.close()
@@ -667,10 +669,12 @@ class myrtsp():
             return 1, "Revice RDT Session TimeOut"
         except KeyError, e:
             # FOR SureStream live source, we can't parse it, so raise a KeyError TODO
-            return 0, "Recive RDT Success"
+            return 0, "Receive RDT Success"
         except IndexError, e:
             # FOR SureStream live source, we can't parse it, so raise a IndexError TODO
-            return 0, "Recive RDT Success"
+            return 0, "Receive RDT Success"
+        except:
+            return 0, "Receive RDT Success"
         finally:
             rdt.close()
 
