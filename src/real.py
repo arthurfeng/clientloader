@@ -32,9 +32,12 @@ class Real():
         sdp_parser = parse_sdp.Sdpplin(sdp)
         try: start_time = sdp_parser['StartTime']
         except: start_time = "0.000-"
+        streamcount = 0
         for i in sdp_parser.streams:
-            streamid=i["streamid"]
+            try:streamid=i["streamid"]
+            except:streamid=streamcount
             result, message = RTSP.send_SETUP("streamid=%s" % streamid)
+            streamcount+=1
         result, message = RTSP.send_SETPARAMETER()
         result, message = RTSP.send_PLAY(start_time)
         if RTSP.RDT:
