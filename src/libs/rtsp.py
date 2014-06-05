@@ -341,17 +341,20 @@ class myrtsp():
 
     def send_OPTIONS(self):
 
-        smsg = self.gen_OPTIONS()
-        if not self.send_rtsp(smsg):
-            return 1, "Send Msg To Helix Server Failed"
-        time.sleep(0.1)
-        rmsg = self.receive_rtsp()
-        self.rtsplib.handleResponse(rmsg)
-        status = self.rtsplib.response_status["status"]
-        if status[0] == 200:
-            return 0, "Send OPTIONS Request Success"
-        else:
-            return status, "Send OPTIONS Request Failed, Recode Code: %s" % status[-1]
+        try:
+            smsg = self.gen_OPTIONS()
+            if not self.send_rtsp(smsg):
+                return 1, "Send Msg To Helix Server Failed"
+            time.sleep(0.1)
+            rmsg = self.receive_rtsp()
+            self.rtsplib.handleResponse(rmsg)
+            status = self.rtsplib.response_status["status"]
+            if status[0] == 200:
+                return 0, "Send OPTIONS Request Success"
+            else:
+                return status, "Send OPTIONS Request Failed, Recode Code: %s" % status[-1]
+        except:
+            return 1, "Unknow error"
 
     def gen_DESCRIBE(self):
 
@@ -467,15 +470,6 @@ class myrtsp():
         self.rtsplib.handleResponse(rmsg)
         status = self.rtsplib.response_status["status"]
         if status[0] == 200:
-            if Bookmarking:
-                if self.rtsplib.response_status.get("Range", None) != None:
-                    start_time = self.rtsplib.response_status["Range"]
-                    if abs(int(start_time)-int(Bookmarking)) > 2:
-                        return 2, "Bookmarking options failed, should be start with %s not %s" % (Bookmarking, start_time)
-                    else:
-                        return 0, "Send Play Success, Bookmaring start with %s" % Bookmarking
-                else:
-                    return 3, "Send Play Success, Bookmarking request failed, need Range in PLAY response msg"
             return 0, "Send PLAY Request Success"
         else:
             return status[0], "Send PLAY Request Failed, Recode Code: %s" % status[1]
