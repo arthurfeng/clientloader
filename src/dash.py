@@ -64,7 +64,7 @@ def connect(url):
     except DASHError, error:
         Logger.printf("%s:%s" % (error.response, error.url), "error")
     except Exception, e:
-        Logger.printf("%s" % e, "error")
+        Logger.printf("DASH PLAYER: %s" % e, "error")
 
 if __name__ == "__main__":
     

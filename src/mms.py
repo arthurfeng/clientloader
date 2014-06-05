@@ -35,4 +35,4 @@ def connect(url):
     except MMSError, error:
         Logger.printf("%s:%s" % (error.response, error.url), "error")
     except Exception, e:
-        Logger.printf("%s" % e, "error")
+        Logger.printf("MMS PLAYER: %s" % e, "error")

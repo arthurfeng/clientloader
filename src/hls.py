@@ -87,7 +87,7 @@ def connect(url):
     except HLSError, error:
         Logger.printf("%s:%s" % (error.response, error.url), 'error')
     except Exception, e:
-        Logger.printf("%s" % e, "error")
+        Logger.printf("HLS PLAYER: %s" % e, "error")
 
 if __name__ == "__main__":
     

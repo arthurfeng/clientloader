@@ -56,7 +56,7 @@ def connect(url):
     except RTSPError, error:
         Logger.printf("%s:%s" % (error.response, error.url), "error")
     except Exception, e:
-        Logger.printf("%s" % e, "error")
+        Logger.printf("REAL PLAYER: %s" % e, "error")
 
 if __name__ == '__main__':
     
