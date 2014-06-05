@@ -7,8 +7,6 @@ try:
     from src import flash, hls, real, dash, mms
 except:
     from src import flash, hls, real, dash
-from src.libs import mythread
-#import matplotlib.pyplot as plt
 import multiprocessing
 import random
 import os
@@ -29,69 +27,54 @@ except ImportError:
 CLIENTSTATUS = dict()
 X_PLOT = list()
 Y_PLOT = list()
-RPC_PORT = 8000
+RPC_PORT = 8888
 USERNAME = "xing"
 PASSWD = "123"
 AUTH = False
+STARTPERSECOND=10.0
 
 class RequestHandler(SimpleXMLRPCRequestHandler):
     rpc_paths = ('/RPC2',)
 
-
 def add_flash_client(task_uuid, url):
     
+    client_uuid = str(uuid.uuid1())
     client = multiprocessing.Process(target=flash.connect, args=(url,), name="rtmp,%s" % url)
+    CLIENTSTATUS[task_uuid][client_uuid] = client
     client.start()
-    if client.is_alive():
-        client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[task_uuid][client_uuid] = client
-        time.sleep(0.5)
-    else:
-        add_flash_client(url)
+    time.sleep(1/STARTPERSECOND)
 
 def add_hls_client(task_uuid, url):
     
+    client_uuid = str(uuid.uuid1())
     client = multiprocessing.Process(target=hls.connect, args=(url,), name="hls,%s" % url)
+    CLIENTSTATUS[task_uuid][client_uuid] = client
     client.start()
-    if client.is_alive():
-        client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[task_uuid][client_uuid] = client
-        time.sleep(0.5)
-    else:
-        add_hls_client(url)
+    time.sleep(1/STARTPERSECOND)
 
 def add_dash_client(task_uuid, url):
     
+    client_uuid = str(uuid.uuid1())
     client = multiprocessing.Process(target=dash.connect, args=(url,), name="dash,%s" % url)
+    CLIENTSTATUS[task_uuid][client_uuid] = client
     client.start()
-    if client.is_alive():
-        client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[task_uuid][client_uuid] = client
-        time.sleep(0.5)
-    else:
-        add_dash_client(url)
+    time.sleep(1/STARTPERSECOND)
 
 def add_real_client(task_uuid, url):
     
+    client_uuid = str(uuid.uuid1())
     client = multiprocessing.Process(target=real.connect, args=(url,), name="rtsp,%s" % url)
+    CLIENTSTATUS[task_uuid][client_uuid] = client
     client.start()
-    if client.is_alive():
-        client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[task_uuid][client_uuid] = client
-        time.sleep(0.5)
-    else:
-        add_real_client(url)
+    time.sleep(1/STARTPERSECOND)
 
 def add_mms_client(task_uuid, url):
     
+    client_uuid = str(uuid.uuid1())
     client = multiprocessing.Process(target=mms.connect, args=(url,), name="mms,%s" % url)
+    CLIENTSTATUS[task_uuid][client_uuid] = client
     client.start()
-    if client.is_alive():
-        client_uuid = str(uuid.uuid1())
-        CLIENTSTATUS[task_uuid][client_uuid] = client
-        time.sleep(0.5)
-    else:
-        add_mms_client(url)
+    time.sleep(1/STARTPERSECOND)
 ########################################################### OPEN FUNCTION ###########################################################
 
 def start_client(task_uuid, url, client_number):
