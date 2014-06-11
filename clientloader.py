@@ -8,33 +8,34 @@ try:
 except:
     from src import flash, hls, real, dash
 import multiprocessing
+import threading
 import random
-import os
 import re
-import sys
+import os
 import uuid
 import time
-import xmlrpclib
-import urlparse
+import pickle
 from SimpleXMLRPCServer import SimpleXMLRPCServer
-from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 
 try:
-    from cStringIO import StringIO
-except ImportError:
-    from StringIO import StringIO
-
-CLIENTSTATUS = dict()
-X_PLOT = list()
-Y_PLOT = list()
+    data = open("client.dat", "r")
+    CLIENTSTATUS = pickle.load(data)
+except:
+    CLIENTSTATUS = {}
 RPC_PORT = 8888
-USERNAME = "xing"
-PASSWD = "123"
-AUTH = False
 STARTPERSECOND=10.0
+MAJORPID = os.getpid()
 
-class RequestHandler(SimpleXMLRPCRequestHandler):
-    rpc_paths = ('/RPC2',)
+def save_to_dat():
+    
+    try:
+        data = None
+        if os.getpid() == MAJORPID:
+            print "logging.."
+            data = open("client.dat", "w")
+            pickle.dump(CLIENTSTATUS, data, 1)
+    finally:
+        if data: data.close()
 
 def add_flash_client(task_uuid, url):
     
@@ -98,6 +99,7 @@ def start_client(task_uuid, url, client_number):
     elif re.match("mms://", url):
         for i in range(client_number):
             add_mms_client(task_uuid, url)
+    save_to_dat()
     return check_clients_status(task_uuid)
 
 def check_stop_clients_number(task_uuid, restart_client_on_failure=False):
@@ -185,6 +187,7 @@ def stop_force(task_uuid):
     for client in CLIENTSTATUS[task_uuid].values():
         stop_client(client)
     CLIENTSTATUS.pop(task_uuid)
+    save_to_dat()
     #print CLIENTSTATUS.keys()
     return True
     
@@ -194,6 +197,7 @@ def clear_clients():
         for client in clientid.values():
             stop_client(client)
     CLIENTSTATUS.clear()
+    save_to_dat()
     return True
 
 def doServer():
@@ -212,9 +216,8 @@ def doServer():
 if __name__ == '__main__':
     
     try:
-        
         doServer()
     except Exception, e:
         print e
     finally:
-        clear_clients()
+        pass
