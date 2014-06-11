@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from parse_xml import XML
 import re
+import time
 
 PARSEXML = XML()
 
@@ -21,6 +22,20 @@ def parse_time(mediaPresentationDuration):
         S_time = float(mediaPresentationDuration[M+1:S])
         real_time = real_time + S_time
     return real_time
+
+def timestampTotimestring():
+
+    pass
+
+def getUTCtimestamp():
+
+    #time.gmtime(time.time())
+    return time.mktime(time.gmtime(time.time()))
+
+def timestringTotimestamp(tstring):
+
+    "2014-05-22T15:32:07Z"
+    return time.mktime(time.strptime(tstring,"%Y-%m-%dT%H:%M:%SZ"))
 
 class ParseDASH():
 
@@ -59,6 +74,11 @@ class ParseDASH():
             mpd_minBufferTime = PARSEXML.get_attrvalue(node, 'minBufferTime')
             mpd_mediaPresentationDuration = parse_time(PARSEXML.get_attrvalue(node, 
                                                 'mediaPresentationDuration'))
+            mpd_minimumUpdatePeriod = parse_time(PARSEXML.get_attrvalue(node, 
+                                                'minimumUpdatePeriod'))
+            mpd_timeShiftBufferDepth = parse_time(PARSEXML.get_attrvalue(node, 
+                                                'timeShiftBufferDepth'))
+            mpd_availabilityStartTime = PARSEXML.get_attrvalue(node, 'availabilityStartTime')
             mpd_profiles = PARSEXML.get_attrvalue(node, 'profiles')
             if re.search(r"mp2t", mpd_profiles):
                 self.MPTS = True
@@ -67,6 +87,10 @@ class ParseDASH():
             self.DASHPROFILE["minBufferTime"] = mpd_minBufferTime
             self.DASHPROFILE["mediaPresentationDuration"] = mpd_mediaPresentationDuration
             self.DASHPROFILE["profiles"] = mpd_profiles
+            self.DASHPROFILE["minimumUpdatePeriod"] = mpd_minimumUpdatePeriod
+            self.DASHPROFILE["timeShiftBufferDepth"] = mpd_timeShiftBufferDepth
+            self.DASHPROFILE["availabilityStartTime"] = mpd_availabilityStartTime
+            self.TIMESLEEP = self.DASHPROFILE["minimumUpdatePeriod"]
             return True
         except Exception, e:
             if self.DEBUG:
@@ -179,9 +203,9 @@ class ParseDASH():
                 timescale = PARSEXML.get_attrvalue(node, "timescale")
                 duration = float(PARSEXML.get_attrvalue(node, "duration"))
                 startnumber = PARSEXML.get_attrvalue(node, "startNumber")
-            if not self.MPTS:
-                    duration = float(duration/1000)
-            self.TIMESLEEP = duration
+                if timescale:
+                    duration = float(duration/int(timescale))
+            #self.TIMESLEEP = duration
             return {"timescale": timescale, "duration": float(duration), 
                         "startNumber": int(startnumber)}
         except Exception, e:
@@ -226,13 +250,14 @@ class ParseDASH():
             duration = ""
             startnumber = ""
             for node in nodes:
+                timescale = PARSEXML.get_attrvalue(node, "timescale")
                 media = PARSEXML.get_attrvalue(node, "media")
                 start = PARSEXML.get_attrvalue(node, "start")
                 duration = int(PARSEXML.get_attrvalue(node, "duration"))
                 startnumber = PARSEXML.get_attrvalue(node, "startNumber")
-                if not self.MPTS:
-                    duration = float(duration/1000)
-            self.TIMESLEEP = duration
+                if timescale:
+                    duration = float(duration/int(timescale))
+            #self.TIMESLEEP = duration
             return {"SegmentTemplate": 
                                 {
                         "media": media,
@@ -264,10 +289,18 @@ class ParseDASH():
                                                         ["SegmentTemplate"].get("startNumber", 1)
                         seg_duration = self.DASHPROFILE["AdaptationSets"][adaptationset]\
                                                         ["SegmentTemplate"].get("duration", 10)
-                        media_duration = self.DASHPROFILE["mediaPresentationDuration"]
+                        media_duration = self.DASHPROFILE["minimumUpdatePeriod"]
+                        bandwidth = self.DASHPROFILE["AdaptationSets"][adaptationset]\
+                                                        ["RepresentationIDs"][rid]["bandwidth"]
+                        if True:
+                            a = int(getUTCtimestamp())
+                            b = int(timestringTotimestamp(self.DASHPROFILE["availabilityStartTime"]))
+                            A = int((a-b)/seg_duration)
+                            start_number= A+start_number
                         while media_duration > 0:
                             url = re.sub(r"\$RepresentationID\$", rid, temple_url)
                             url = re.sub(r"\$Number\$", str(start_number), url)
+                            url = re.sub(r"\$Bandwidth\$", str(bandwidth), url)
                             url = "%s%s" % (base_url, url)
                             start_number += 1
                             media_duration -= seg_duration
@@ -295,13 +328,15 @@ class ParseDASH():
  
 if __name__ == "__main__":
 
+    print getUTCtimestamp()
+    print timestringTotimestamp("2014-05-22T15:32:07Z")
     import sys
-    import parse_url
-    PU = parse_url.ParseUrl() 
-    f = open(sys.argv[1],'r')
-    lines = f.read()
-    f.close()
-    PDASH = ParseDASH()
+    #import parse_url
+    #PU = parse_url.ParseUrl() 
+    #f = open(sys.argv[1],'r')
+    #lines = f.read()
+    #f.close()
+    #PDASH = ParseDASH()
     #PDASH.DEBUG = 1
     #print PDASH.start(lines)[2]
-    print PU.get_segment_number("mpts", 0, PDASH.start(lines)[2][0])
+    #print PU.get_segment_number("mpts", 0, PDASH.start(lines)[2][0])
