@@ -196,6 +196,8 @@ class ParseDASH():
     def segmentlist(self, nodes):
 
         try:
+            if not nodes:
+                return {}
             timescale = ""
             duration = ""
             startnumber = ""
@@ -210,7 +212,7 @@ class ParseDASH():
                         "startNumber": int(startnumber)}
         except Exception, e:
             if self.DEBUG:
-                print e
+                print "segmentlist", e
             return {}
 
     def initialization(self, nodes):
@@ -253,10 +255,10 @@ class ParseDASH():
                 timescale = PARSEXML.get_attrvalue(node, "timescale")
                 media = PARSEXML.get_attrvalue(node, "media")
                 start = PARSEXML.get_attrvalue(node, "start")
-                duration = int(PARSEXML.get_attrvalue(node, "duration"))
+                duration = float(PARSEXML.get_attrvalue(node, "duration"))
                 startnumber = PARSEXML.get_attrvalue(node, "startNumber")
                 if timescale:
-                    duration = float(duration/int(timescale))
+                    duration = float(duration/float(timescale))
             #self.TIMESLEEP = duration
             return {"SegmentTemplate": 
                                 {
@@ -289,15 +291,16 @@ class ParseDASH():
                                                         ["SegmentTemplate"].get("startNumber", 1)
                         seg_duration = self.DASHPROFILE["AdaptationSets"][adaptationset]\
                                                         ["SegmentTemplate"].get("duration", 10)
-                        media_duration = self.DASHPROFILE["minimumUpdatePeriod"]
+                        #media_duration = self.DASHPROFILE["minimumUpdatePeriod"]
+                        media_duration = self.DASHPROFILE["mediaPresentationDuration"]
                         bandwidth = self.DASHPROFILE["AdaptationSets"][adaptationset]\
                                                         ["RepresentationIDs"][rid]["bandwidth"]
-                        if True:
+                        if not True:
                             a = int(getUTCtimestamp())
                             b = int(timestringTotimestamp(self.DASHPROFILE["availabilityStartTime"]))
                             A = int((a-b)/seg_duration)
                             start_number= A+start_number
-                        while media_duration > 0:
+                        while media_duration >= 10:
                             url = re.sub(r"\$RepresentationID\$", rid, temple_url)
                             url = re.sub(r"\$Number\$", str(start_number), url)
                             url = re.sub(r"\$Bandwidth\$", str(bandwidth), url)
@@ -328,15 +331,15 @@ class ParseDASH():
  
 if __name__ == "__main__":
 
-    print getUTCtimestamp()
-    print timestringTotimestamp("2014-05-22T15:32:07Z")
+    #print getUTCtimestamp()
+    #print timestringTotimestamp("2014-05-22T15:32:07Z")
     import sys
     #import parse_url
     #PU = parse_url.ParseUrl() 
-    #f = open(sys.argv[1],'r')
-    #lines = f.read()
-    #f.close()
-    #PDASH = ParseDASH()
-    #PDASH.DEBUG = 1
-    #print PDASH.start(lines)[2]
+    f = open(sys.argv[1],'r')
+    lines = f.read()
+    f.close()
+    PDASH = ParseDASH()
+    PDASH.DEBUG = 1
+    print PDASH.start(lines)[2][0]
     #print PU.get_segment_number("mpts", 0, PDASH.start(lines)[2][0])
