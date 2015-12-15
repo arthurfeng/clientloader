@@ -2,7 +2,7 @@ clientloader
 ============
 
 clienloader is a free, open source, lightweight load testing tool.
-Created by FengJian(Arthur Feng)
+Created by FengJian
 
 To use the load testing tool:
 python clientload.py
